@@ -6,18 +6,60 @@ from io import StringIO
 
 # ---------------- CONFIG ----------------
 st.set_page_config(
-    page_title="IQROGUEREX Sales Insights",
+    page_title="IQROGUEREX Analytics",
     layout="wide",
     page_icon="📊"
 )
 
-# ---------------- STYLE ----------------
+# ---------------- PREMIUM UI STYLE ----------------
 st.markdown("""
-    <style>
-    [data-testid="stMetricValue"] { font-size: 1.8rem; color: #00d4ff; }
-    .main { background-color: #0E1117; }
-    div.stButton > button:first-child { background-color: #00d4ff; color:white; border:none; }
-    </style>
+<style>
+/* Background */
+.stApp {
+    background: linear-gradient(135deg, #0E1117 0%, #111827 100%);
+    color: #E5E7EB;
+}
+
+/* Glass Card */
+.card {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 16px;
+    padding: 20px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+
+/* KPI Metric */
+[data-testid="stMetricValue"] {
+    font-size: 2rem;
+    font-weight: 600;
+    color: #22d3ee;
+}
+
+/* Titles */
+h1, h2, h3 {
+    font-weight: 600;
+}
+
+/* Buttons */
+.stButton > button {
+    background: linear-gradient(90deg, #06b6d4, #3b82f6);
+    color: white;
+    border-radius: 10px;
+    border: none;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: #0B0F19;
+}
+
+/* Table */
+.stDataFrame {
+    background: rgba(255,255,255,0.02);
+    border-radius: 12px;
+}
+</style>
 """, unsafe_allow_html=True)
 
 # ---------------- DATA ----------------
@@ -26,15 +68,12 @@ GITHUB_URL = "https://raw.githubusercontent.com/iqroguerex-cpu/iqroguerex-cpu/ma
 @st.cache_data
 def load_data():
     try:
-        # --- TRY GITHUB FIRST ---
         response = requests.get(GITHUB_URL)
-
         if response.status_code == 200:
-            st.success("✅ Loaded data from GitHub")
-            data = StringIO(response.text)
-            df = pd.read_csv(data)
+            df = pd.read_csv(StringIO(response.text))
+        else:
+            df = pd.read_csv("sales_data.csv")
 
-        # --- CLEAN DATA ---
         df["Order_Date"] = pd.to_datetime(df["Order_Date"], errors="coerce")
         df = df.dropna(subset=["Order_Date"])
 
@@ -45,19 +84,20 @@ def load_data():
 
         return df
 
-    except Exception as e:
-        st.error("🚨 Data loading failed completely")
-        st.exception(e)
-        return None
+    except:
+        return pd.DataFrame()
 
 df = load_data()
 
-# ---------------- APP ----------------
-if df is not None and not df.empty:
+# ---------------- HEADER ----------------
+st.title("📊 IQROGUEREX Sales Intelligence")
+st.caption("Real-time performance analytics dashboard")
+st.markdown("---")
 
-    # SIDEBAR
-    st.sidebar.header("📊 Filters")
+# ---------------- SIDEBAR ----------------
+st.sidebar.header("🔎 Filters")
 
+if not df.empty:
     min_date = df["Order_Date"].min().date()
     max_date = df["Order_Date"].max().date()
 
@@ -90,11 +130,12 @@ if df is not None and not df.empty:
     else:
         f_df = df
 
-    # TITLE
-    st.title("📊 Sales Performance Dashboard")
-    st.divider()
+else:
+    f_df = pd.DataFrame()
 
-    # KPIs
+# ---------------- KPI SECTION ----------------
+if not f_df.empty:
+
     col1, col2, col3, col4 = st.columns(4)
 
     revenue = f_df["Total_Sales"].sum()
@@ -102,16 +143,33 @@ if df is not None and not df.empty:
     customers = f_df["Customer_Name"].nunique()
     aov = revenue / orders if orders else 0
 
-    col1.metric("Revenue", f"${revenue:,.0f}")
-    col2.metric("Orders", orders)
-    col3.metric("Customers", customers)
-    col4.metric("AOV", f"${aov:,.2f}")
+    with col1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.metric("💰 Revenue", f"${revenue:,.0f}")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    # CHARTS
+    with col2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.metric("📦 Orders", orders)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col3:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.metric("👥 Customers", customers)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col4:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.metric("📊 AOV", f"${aov:,.2f}")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("## 📈 Performance Overview")
+
     left, right = st.columns([7, 3])
 
+    # -------- LINE CHART --------
     with left:
-        st.subheader("Revenue Trend")
+        st.markdown('<div class="card">', unsafe_allow_html=True)
 
         trend = f_df.groupby(
             f_df["Order_Date"].dt.to_period("M")
@@ -127,23 +185,37 @@ if df is not None and not df.empty:
             markers=True
         )
 
+        fig.update_layout(
+            margin=dict(l=10, r=10, t=30, b=10),
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)"
+        )
+
         st.plotly_chart(fig, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
+    # -------- PIE CHART --------
     with right:
-        st.subheader("Category Split")
+        st.markdown('<div class="card">', unsafe_allow_html=True)
 
-        if not f_df.empty:
-            fig2 = px.pie(
-                f_df,
-                values="Total_Sales",
-                names="Category",
-                hole=0.4,
-                template="plotly_dark"
-            )
-            st.plotly_chart(fig2, use_container_width=True)
+        fig2 = px.pie(
+            f_df,
+            values="Total_Sales",
+            names="Category",
+            hole=0.5,
+            template="plotly_dark"
+        )
 
-    # TOP CUSTOMERS
-    st.subheader("🏆 Top Customers")
+        fig2.update_layout(
+            margin=dict(l=10, r=10, t=30, b=10),
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+
+        st.plotly_chart(fig2, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # -------- TOP CUSTOMERS --------
+    st.markdown("## 🏆 Top Customers")
 
     top = (
         f_df.groupby("Customer_Name")["Total_Sales"]
@@ -152,17 +224,25 @@ if df is not None and not df.empty:
         .reset_index()
     )
 
-    st.dataframe(top)
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.dataframe(top, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # DOWNLOAD
+    # -------- DOWNLOAD --------
     csv = f_df.to_csv(index=False).encode("utf-8")
 
     st.download_button(
-        "📥 Download CSV",
+        "⬇ Download Report",
         csv,
-        "sales_report.csv",
+        "IQROGUEREX_Report.csv",
         "text/csv"
     )
 
+# ---------------- EMPTY STATE ----------------
 else:
-    st.error("❌ No data available")
+    st.markdown("""
+    <div style="text-align:center; padding:80px;">
+        <h2>📭 No Data Available</h2>
+        <p style="color:gray;">Try adjusting your filters or check your data source.</p>
+    </div>
+    """, unsafe_allow_html=True)
