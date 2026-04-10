@@ -1,114 +1,101 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 
 # 1. Configuration & Theming
 st.set_page_config(page_title="IQROGUEREX Sales Insights", layout="wide", page_icon="📊")
 
-# Custom CSS for a sleek dark professional look
+# Professional Dark Theme CSS
 st.markdown("""
     <style>
     [data-testid="stMetricValue"] { font-size: 1.8rem; color: #00d4ff; }
     .main { background-color: #0E1117; }
-    div.stButton > button:first-child { background-color: #00d4ff; color:white; }
+    div.stButton > button:first-child { background-color: #00d4ff; color:white; border:none; }
+    .stTable { background-color: #1E222A; border-radius: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. Data Connection
-# Updated URL based on your repo structure
-DATA_URL = "https://raw.githubusercontent.com/iqroguerex-cpu/sales-dashboard/main/sales_data.csv"
+# 2. Data Connection (Updated with exact Raw URL structure)
+DATA_URL = "https://raw.githubusercontent.com/iqroguerex-cpu/iqroguerex-cpu/main/sales_data.csv"
 
 @st.cache_data
 def load_data():
     try:
+        # storage_options helps bypass some security blocks on raw requests
         data = pd.read_csv(DATA_URL)
         data["Order_Date"] = pd.to_datetime(data["Order_Date"])
         data["Total_Sales"] = data["Quantity"] * data["Price"]
         return data
     except Exception as e:
-        st.error(f"Error connecting to GitHub data: {e}")
+        # If the file isn't found, we show a clear error
+        st.error("🚨 **Data Connection Failed**")
+        st.info(f"Please ensure your repository is **Public** and the file name is **sales_data.csv**.")
         return None
 
 df = load_data()
 
 if df is not None:
-    # --- SIDEBAR FILTERS ---
-    st.sidebar.image("https://via.placeholder.com/150x50?text=IQROGUEREX", use_container_width=True)
-    st.sidebar.title("Control Panel")
+    # --- SIDEBAR ---
+    st.sidebar.header("📊 Filter Analytics")
     
     min_date, max_date = df["Order_Date"].min(), df["Order_Date"].max()
     
-    date_range = st.sidebar.date_input("Timeframe", [min_date, max_date], min_value=min_date, max_value=max_date)
+    date_range = st.sidebar.date_input("Date Range", [min_date, max_date], min_value=min_date, max_value=max_date)
     
-    region = st.sidebar.multiselect("Geography", options=df["Region"].unique(), default=df["Region"].unique())
-    category = st.sidebar.multiselect("Product Category", options=df["Category"].unique(), default=df["Category"].unique())
+    region = st.sidebar.multiselect("Region", options=df["Region"].unique(), default=df["Region"].unique())
+    category = st.sidebar.multiselect("Category", options=df["Category"].unique(), default=df["Category"].unique())
 
-    # Filter Logic
-    if len(date_range) == 2:
-        mask = (df["Order_Date"] >= pd.Timestamp(date_range[0])) & \
-               (df["Order_Date"] <= pd.Timestamp(date_range[1])) & \
-               (df["Region"].isin(region)) & \
-               (df["Category"].isin(category))
-        f_df = df.loc[mask]
+    # Ensure range is fully selected
+    if isinstance(date_range, list) or isinstance(date_range, tuple):
+        if len(date_range) == 2:
+            mask = (df["Order_Date"] >= pd.Timestamp(date_range[0])) & \
+                   (df["Order_Date"] <= pd.Timestamp(date_range[1])) & \
+                   (df["Region"].isin(region)) & \
+                   (df["Category"].isin(category))
+            f_df = df.loc[mask]
+        else:
+            f_df = df
     else:
         f_df = df
 
-    # --- HEADER ---
+    # --- MAIN CONTENT ---
     st.title("📊 Sales Performance Analytics")
-    st.markdown(f"**Enterprise:** IQROGUEREX | **Report Period:** {date_range[0]} to {date_range[-1]}")
+    st.caption("Powered by IQROGUEREX Data Engine")
     st.divider()
 
-    # --- KPI METRICS ---
-    col1, col2, col3, col4 = st.columns(4)
-    
+    # KPI Metrics
+    m1, m2, m3, m4 = st.columns(4)
     rev = f_df["Total_Sales"].sum()
     orders = f_df["Order_ID"].nunique()
-    avg_val = rev / orders if orders > 0 else 0
     cust = f_df["Customer_Name"].nunique()
+    aov = rev / orders if orders > 0 else 0
 
-    col1.metric("Gross Revenue", f"${rev:,.2f}")
-    col2.metric("Order Volume", f"{orders:,}")
-    col3.metric("Avg. Order Value", f"${avg_val:,.2f}")
-    col4.metric("Active Customers", f"{cust:,}")
+    m1.metric("Gross Revenue", f"${rev:,.0f}")
+    m2.metric("Orders", f"{orders:,}")
+    m3.metric("Customers", f"{cust:,}")
+    m4.metric("Avg. Order Value", f"${aov:,.2f}")
 
-    st.write("")
+    # Visuals
+    col_left, col_right = st.columns([7, 3])
 
-    # --- VISUALIZATIONS ---
-    c1, c2 = st.columns([6, 4])
+    with col_left:
+        st.subheader("Revenue Trend")
+        trend = f_df.groupby(f_df['Order_Date'].dt.to_period('M'))['Total_Sales'].sum().reset_index()
+        trend['Order_Date'] = trend['Order_Date'].astype(str)
+        fig_line = px.line(trend, x='Order_Date', y='Total_Sales', template="plotly_dark", markers=True)
+        fig_line.update_traces(line_color='#00d4ff')
+        st.plotly_chart(fig_line, use_container_width=True)
 
-    with c1:
-        st.subheader("📈 Revenue Trend Line")
-        trend_df = f_df.resample('M', on='Order_Date').sum(numeric_only=True).reset_index()
-        fig_trend = px.line(trend_df, x="Order_Date", y="Total_Sales", 
-                            markers=True, template="plotly_dark",
-                            color_discrete_sequence=["#00d4ff"])
-        fig_trend.update_layout(xaxis_title="", yaxis_title="Revenue ($)")
-        st.plotly_chart(fig_trend, use_container_width=True)
-
-    with c2:
-        st.subheader("🎯 Category Market Share")
-        fig_pie = px.pie(f_df, values="Total_Sales", names="Category", 
-                         hole=0.5, template="plotly_dark")
-        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+    with col_right:
+        st.subheader("Category Split")
+        fig_pie = px.pie(f_df, values='Total_Sales', names='Category', hole=0.4, template="plotly_dark")
         st.plotly_chart(fig_pie, use_container_width=True)
 
-    c3, c4 = st.columns(2)
+    # Bottom Row
+    st.subheader("🏆 Top performing Customers")
+    top_df = f_df.groupby("Customer_Name")["Total_Sales"].sum().nlargest(5).reset_index()
+    st.table(top_df.style.format({"Total_Sales": "${:,.2f}"}))
 
-    with c3:
-        st.subheader("📍 Regional Performance")
-        reg_df = f_df.groupby("Region")["Total_Sales"].sum().reset_index()
-        fig_reg = px.bar(reg_df, x="Region", y="Total_Sales", 
-                         color="Total_Sales", color_continuous_scale="Blues",
-                         template="plotly_dark")
-        st.plotly_chart(fig_reg, use_container_width=True)
-
-    with c4:
-        st.subheader("🏆 Top 5 Strategic Accounts")
-        top_c = f_df.groupby("Customer_Name")["Total_Sales"].sum().nlargest(5).reset_index()
-        st.table(top_c.style.format({"Total_Sales": "${:,.2f}"}))
-
-    # --- EXPORT ---
-    st.divider()
+    # Export
     csv = f_df.to_csv(index=False).encode("utf-8")
-    st.download_button("📩 Export Filtered Dataset", data=csv, file_name="IQ_Sales_Report.csv", mime="text/csv")
+    st.download_button("📥 Download Filtered CSV", data=csv, file_name="IQ_Sales_Report.csv")
