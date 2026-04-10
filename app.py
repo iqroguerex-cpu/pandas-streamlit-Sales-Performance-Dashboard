@@ -3,9 +3,13 @@ import pandas as pd
 import plotly.express as px
 
 # 1. Configuration & Theming
-st.set_page_config(page_title="IQROGUEREX Sales Insights", layout="wide", page_icon="📊")
+st.set_page_config(
+    page_title="IQROGUEREX Sales Insights",
+    layout="wide",
+    page_icon="📊"
+)
 
-# Professional Dark Theme CSS
+# Dark Theme Styling
 st.markdown("""
     <style>
     [data-testid="stMetricValue"] { font-size: 1.8rem; color: #00d4ff; }
@@ -15,48 +19,79 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. Data Connection (Updated with exact Raw URL structure)
+# 2. Data Source
 DATA_URL = "https://raw.githubusercontent.com/iqroguerex-cpu/iqroguerex-cpu/main/sales_data.csv"
 
 @st.cache_data
 def load_data():
     try:
-        # storage_options helps bypass some security blocks on raw requests
-        data = pd.read_csv(DATA_URL)
-        data["Order_Date"] = pd.to_datetime(data["Order_Date"])
-        data["Total_Sales"] = data["Quantity"] * data["Price"]
-        return data
+        df = pd.read_csv(DATA_URL)
+
+        # Ensure required columns exist
+        required_cols = ["Order_Date", "Quantity", "Price", "Order_ID", "Customer_Name", "Region", "Category"]
+        for col in required_cols:
+            if col not in df.columns:
+                st.error(f"Missing column: {col}")
+                return None
+
+        # Data cleaning
+        df["Order_Date"] = pd.to_datetime(df["Order_Date"], errors="coerce")
+        df = df.dropna(subset=["Order_Date"])
+
+        df["Quantity"] = pd.to_numeric(df["Quantity"], errors="coerce").fillna(0)
+        df["Price"] = pd.to_numeric(df["Price"], errors="coerce").fillna(0)
+
+        df["Total_Sales"] = df["Quantity"] * df["Price"]
+
+        return df
+
     except Exception as e:
-        # If the file isn't found, we show a clear error
-        st.error("🚨 **Data Connection Failed**")
-        st.info(f"Please ensure your repository is **Public** and the file name is **sales_data.csv**.")
+        st.error("🚨 Data Connection Failed")
+        st.exception(e)
         return None
 
 df = load_data()
 
-if df is not None:
+if df is not None and not df.empty:
+
     # --- SIDEBAR ---
     st.sidebar.header("📊 Filter Analytics")
-    
-    min_date, max_date = df["Order_Date"].min(), df["Order_Date"].max()
-    
-    date_range = st.sidebar.date_input("Date Range", [min_date, max_date], min_value=min_date, max_value=max_date)
-    
-    region = st.sidebar.multiselect("Region", options=df["Region"].unique(), default=df["Region"].unique())
-    category = st.sidebar.multiselect("Category", options=df["Category"].unique(), default=df["Category"].unique())
 
-    # Ensure range is fully selected
-    if isinstance(date_range, list) or isinstance(date_range, tuple):
-        if len(date_range) == 2:
-            mask = (df["Order_Date"] >= pd.Timestamp(date_range[0])) & \
-                   (df["Order_Date"] <= pd.Timestamp(date_range[1])) & \
-                   (df["Region"].isin(region)) & \
-                   (df["Category"].isin(category))
-            f_df = df.loc[mask]
-        else:
-            f_df = df
+    min_date = df["Order_Date"].min().date()
+    max_date = df["Order_Date"].max().date()
+
+    date_range = st.sidebar.date_input(
+        "Date Range",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date
+    )
+
+    region = st.sidebar.multiselect(
+        "Region",
+        options=df["Region"].dropna().unique(),
+        default=df["Region"].dropna().unique()
+    )
+
+    category = st.sidebar.multiselect(
+        "Category",
+        options=df["Category"].dropna().unique(),
+        default=df["Category"].dropna().unique()
+    )
+
+    # --- FILTER LOGIC ---
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+
+        mask = (
+            (df["Order_Date"] >= pd.Timestamp(start_date)) &
+            (df["Order_Date"] <= pd.Timestamp(end_date)) &
+            (df["Region"].isin(region)) &
+            (df["Category"].isin(category))
+        )
+        f_df = df.loc[mask]
     else:
-        f_df = df
+        f_df = df.copy()
 
     # --- MAIN CONTENT ---
     st.title("📊 Sales Performance Analytics")
@@ -65,6 +100,7 @@ if df is not None:
 
     # KPI Metrics
     m1, m2, m3, m4 = st.columns(4)
+
     rev = f_df["Total_Sales"].sum()
     orders = f_df["Order_ID"].nunique()
     cust = f_df["Customer_Name"].nunique()
@@ -75,27 +111,70 @@ if df is not None:
     m3.metric("Customers", f"{cust:,}")
     m4.metric("Avg. Order Value", f"${aov:,.2f}")
 
-    # Visuals
+    # --- CHARTS ---
     col_left, col_right = st.columns([7, 3])
 
     with col_left:
         st.subheader("Revenue Trend")
-        trend = f_df.groupby(f_df['Order_Date'].dt.to_period('M'))['Total_Sales'].sum().reset_index()
+
+        trend = (
+            f_df.groupby(f_df['Order_Date'].dt.to_period('M'))['Total_Sales']
+            .sum()
+            .reset_index()
+        )
+
         trend['Order_Date'] = trend['Order_Date'].astype(str)
-        fig_line = px.line(trend, x='Order_Date', y='Total_Sales', template="plotly_dark", markers=True)
+
+        fig_line = px.line(
+            trend,
+            x='Order_Date',
+            y='Total_Sales',
+            template="plotly_dark",
+            markers=True
+        )
+
         fig_line.update_traces(line_color='#00d4ff')
         st.plotly_chart(fig_line, use_container_width=True)
 
     with col_right:
         st.subheader("Category Split")
-        fig_pie = px.pie(f_df, values='Total_Sales', names='Category', hole=0.4, template="plotly_dark")
-        st.plotly_chart(fig_pie, use_container_width=True)
 
-    # Bottom Row
-    st.subheader("🏆 Top performing Customers")
-    top_df = f_df.groupby("Customer_Name")["Total_Sales"].sum().nlargest(5).reset_index()
-    st.table(top_df.style.format({"Total_Sales": "${:,.2f}"}))
+        if not f_df.empty:
+            fig_pie = px.pie(
+                f_df,
+                values='Total_Sales',
+                names='Category',
+                hole=0.4,
+                template="plotly_dark"
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+        else:
+            st.warning("No data available for selected filters.")
 
-    # Export
+    # --- TOP CUSTOMERS ---
+    st.subheader("🏆 Top Performing Customers")
+
+    if not f_df.empty:
+        top_df = (
+            f_df.groupby("Customer_Name")["Total_Sales"]
+            .sum()
+            .nlargest(5)
+            .reset_index()
+        )
+
+        st.dataframe(top_df.style.format({"Total_Sales": "${:,.2f}"}))
+    else:
+        st.warning("No data to display.")
+
+    # --- EXPORT ---
     csv = f_df.to_csv(index=False).encode("utf-8")
-    st.download_button("📥 Download Filtered CSV", data=csv, file_name="IQ_Sales_Report.csv")
+
+    st.download_button(
+        "📥 Download Filtered CSV",
+        data=csv,
+        file_name="IQ_Sales_Report.csv",
+        mime="text/csv"
+    )
+
+else:
+    st.warning("No data loaded. Please check your data source.")
